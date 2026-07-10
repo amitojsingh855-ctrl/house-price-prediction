@@ -1,5 +1,6 @@
 .env
-# ignore this file
-
+__pycache__/
+*.pyc
 venv/
-# ignore the virtual environment folder if exists
+model/model.pkl
+model/label_encoder.pkl

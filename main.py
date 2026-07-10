@@ -1,71 +1,73 @@
-from fastapi import FastAPI , Depends
-# updated as per Day_2
-
+from fastapi import FastAPI, Depends
 from sqlalchemy.orm import Session
-# updated code as per Day2
+from database import Base, engine, get_db
+from models import PredictionHistory
+from schemas import HouseInput
+import joblib
+import pandas as pd
 
-from database import get_db
-# updated code as per Day2
+# auto create prediction_history table in Neon on startup
+Base.metadata.create_all(bind=engine)
 
-from schemas import TaskSchema
-# updated code as per Day2
+app = FastAPI(title="House Price Prediction API")
 
-
-from database import Base , engine
-
-from models import Task
-
-Base.metadata.create_all(bind = engine)
-
-
-# here Base contains all database table definition
-# and engine , contains the cloud database connection
-
-app = FastAPI()
+# load ML model and label encoder at startup
+# both files must be inside the model/ folder
+model = joblib.load("model/model.pkl")
+le    = joblib.load("model/label_encoder.pkl")
 
 
-# Home endpoint 
+# Home API
 @app.get("/")
 def home():
-
-    return {"message" : "Welcome to Cloud Task Manager API"}
-
-
-# This API  tells that : FastAPI is running and the application started successfully
-
-# now run the project using uvicorn main: app --reload 
+    return {"message": "House Price Prediction API is running"}
 
 
-# As per Day_2
+# Predict API
+@app.post("/predict")
+def predict(data: HouseInput, db: Session = Depends(get_db)):
 
-@app.post("/create_task")
-def create_task(task : TaskSchema , db : Session= Depends(get_db)):
+    # encode ocean_proximity using the same label encoder used during training
+    ocean_encoded = le.transform([data.ocean_proximity])[0]
 
-    # create task object
-    new_task = Task(task_title = task.task_title , description = task.description,assigned_to = task.assigned_to,priority = task.priority , status = task.status ,due_date = task.due_date,created_by = task.created_by)
+    # build input dataframe matching exact column order from training
+    input_df = pd.DataFrame([{
+        "housing_median_age": data.housing_median_age,
+        "total_rooms":        data.total_rooms,
+        "total_bedrooms":     data.total_bedrooms,
+        "population":         data.population,
+        "households":         data.households,
+        "median_income":      data.median_income,
+        "ocean_proximity":    ocean_encoded
+    }])
 
+    # predict using loaded ML model
+    predicted_price = model.predict(input_df)[0]
 
-    # add task
-    db.add(new_task)
-
-    # commit changes
+    # store prediction in Neon PostgreSQL prediction_history table
+    record = PredictionHistory(
+        housing_median_age = data.housing_median_age,
+        total_rooms        = data.total_rooms,
+        total_bedrooms     = data.total_bedrooms,
+        population         = data.population,
+        households         = data.households,
+        median_income      = data.median_income,
+        ocean_proximity    = data.ocean_proximity,
+        predicted_price    = round(float(predicted_price), 2)
+    )
+    db.add(record)
     db.commit()
 
-    # refresh object
-    db.refresh(new_task)
-
-    # return response
-    return {"message" : "Task Created Successfully"}
-
-# the data sent from Postman is first validated by the Taskschema (Pydantic schema) , if it is valid , the values are then copied into the task model , which represents the database table , and finally stored in the database 
-
-# now , go to the postman and start implementing the operations
-
-@app.get("/tasks")
-def get_task(db = Depends(get_db)):
+    return {
+        "predicted_price": round(float(predicted_price), 2),
+        "message": "Prediction stored successfully"
+    }
 
 
-    tasks = db.query(Task).all()
-
-
-    return tasks
+# View last 10 predictions — Bonus feature
+@app.get("/history")
+def get_history(db: Session = Depends(get_db)):
+    records = db.query(PredictionHistory).order_by(
+        PredictionHistory.id.desc()
+    ).limit(10).all()
+    return records
