@@ -5,16 +5,40 @@ from models import PredictionHistory
 from schemas import HouseInput
 import joblib
 import pandas as pd
+import os
+import subprocess
+import sys
 
 # auto create prediction_history table in Neon on startup
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="House Price Prediction API")
 
-# load ML model and label encoder at startup
-# both files must be inside the model/ folder
+# train model if model.pkl does not exist
+# this runs on first deploy on Render since model.pkl is not in GitHub
+def ensure_model_exists():
+
+    if not os.path.exists("model/model.pkl"):
+
+        print("model.pkl not found. Training model now...")
+
+        # run the training script
+        subprocess.run([sys.executable, "train_model.py"], check=True)
+
+        print("Model training complete.")
+
+    else:
+
+        print("model.pkl found. Skipping training.")
+
+# run model check before app starts
+ensure_model_exists()
+
+# load ML model and label encoder
 model = joblib.load("model/model.pkl")
 le    = joblib.load("model/label_encoder.pkl")
+
+print("Model and label encoder loaded successfully.")
 
 
 # Home API
@@ -64,7 +88,7 @@ def predict(data: HouseInput, db: Session = Depends(get_db)):
     }
 
 
-# View last 10 predictions — Bonus feature
+# View last 10 predictions
 @app.get("/history")
 def get_history(db: Session = Depends(get_db)):
     records = db.query(PredictionHistory).order_by(
