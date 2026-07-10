@@ -15,8 +15,7 @@ df = pd.read_csv("data/house_price_cleaned.csv")
 print(f"Dataset loaded: {df.shape[0]} rows")
 
 # drop irrelevant columns (same as notebook)
-df = df.drop(columns=["longitude", "latitude"], axis=1)
-
+df = df.drop(columns=["longitude", "latitude"])
 # label encode ocean_proximity
 le = LabelEncoder()
 df.ocean_proximity = le.fit_transform(df.ocean_proximity)
